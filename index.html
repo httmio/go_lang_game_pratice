@@ -169,9 +169,7 @@
           });
 
           // 自動根據當前網址切換 ws:// 或 wss://
-          const protocol =
-            window.location.protocol === "https:" ? "wss:" : "ws:";
-          const ws = new WebSocket(`${protocol}//${window.location.host}/game`);
+          let ws = null;
 
           // 輔助：格式化時間
           const getTimestamp = () => new Date().toLocaleTimeString();
@@ -188,40 +186,32 @@
             });
           };
 
-          // 初始化 WebSocket
           const initWebSocket = () => {
-            ws = new WebSocket("ws://localhost:8080/game");
+            const protocol =
+              window.location.protocol === "https:" ? "wss:" : "ws:";
+            // 2. 在這裡才真正建立連線
+            ws = new WebSocket(`${protocol}//${window.location.host}/game`);
 
             ws.onopen = () => {
               isConnected.value = true;
               statusMessage.value = "我的身份：已連線玩家";
-              addLog("成功連線至遊戲伺服器！");
             };
 
             ws.onmessage = (event) => {
               const data = JSON.parse(event.data);
-
-              // 處理新玩家加入時的世界狀態初始化
               if (data.event === "init") {
-                addLog("收到伺服器同步世界狀態...");
                 Object.assign(trees, data.trees);
               }
-
-              // 處理砍樹受損事件
               if (data.event === "tree_damaged") {
                 if (trees[data.tree_id]) {
                   trees[data.tree_id].hp = data.current_hp;
                 }
-                addLog(
-                  `玩家 [${data.player_id}] 砍了 ${data.tree_id}！(剩餘 HP: ${data.current_hp})`,
-                );
               }
             };
 
             ws.onclose = () => {
               isConnected.value = false;
               statusMessage.value = "與伺服器斷開連線";
-              addLog("連線已關閉。");
             };
           };
 
