@@ -153,6 +153,10 @@ func main() {
 		}
 	})
 
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "index.html") // 把同目錄下的 index.html 丟給瀏覽器
+	})
+
 	server := nbhttp.NewServer(nbhttp.Config{
 		Network: "tcp",
 		Addrs:   []string{":8080"},
