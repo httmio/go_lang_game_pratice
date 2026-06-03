@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go + Vue 3 砍樹遊戲</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #eef2f3;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { color: #2c3e50; }
+        .status-badge {
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-bottom: 30px;
+            color: white;
+            transition: background-color 0.3s;
+        }
+        .connected { background-color: #34495e; }
+        .disconnected { background-color: #c0392b; }
+        
+        /* 遊戲世界排版 */
+        .game-world {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+        /* 樹木樣式 */
+        .tree-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 120px;
+        }
+        .tree-icon {
+            font-size: 64px;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+            user-select: none;
+        }
+        .tree-icon:active {
+            transform: scale(0.9) rotate(-5deg);
+        }
+        .tree-name {
+            font-weight: bold;
+            margin: 10px 0;
+            color: #27ae60;
+        }
+        /* 血量條樣式 */
+        .hp-bar-bg {
+            width: 100%;
+            height: 12px;
+            background-color: #eceff1;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .hp-bar-fill {
+            height: 100%;
+            transition: width 0.2s ease, background-color 0.3s;
+        }
+        /* 遊戲日誌 */
+        .log-container {
+            width: 100%;
+            max-width: 500px;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .log-title {
+            font-weight: bold;
+            color: #7f8c8d;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .logs {
+            height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+            color: #34495e;
+        }
+        .log-entry { margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+
+    <div id="app">
+        <h1>🌲 多人線上砍樹遊戲 (Vue 3) 🌲</h1>
+        
+        <div :class="['status-badge', isConnected ? 'connected' : 'disconnected']">
+            {{ statusMessage }}
+        </div>
+
+        <div class="game-world">
+            <div v-for="(tree, treeId) in trees" :key="treeId" class="tree-container">
+                <div class="tree-icon" @click="chopTree(treeId)">
+                    {{ tree.hp <= 0 ? '🪓' : getTreeEmoji(treeId) }}
+                </div>
+                <div class="tree-name">{{ getTreeName(treeId) }}</div>
+                
+                <div class="hp-bar-bg">
+                    <div class="hp-bar-fill" 
+                         :style="{ width: tree.hp + '%', backgroundColor: getHpColor(tree.hp) }">
+                    </div>
+                </div>
+                <span style="font-size: 12px; margin-top: 5px;">{{ tree.hp }}/100</span>
+            </div>
+        </div>
+
+        <div class="log-container">
+            <div class="log-title">伺服器廣播事件日誌</div>
+            <div class="logs" ref="logsContainer">
+                <div v-for="(log, index) in gameLogs" :key="index" class="log-entry">
+                    [{{ log.time }}] {{ log.text }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                // 連線狀態與資料
+                const isConnected = ref(false);
+                const statusMessage = ref("連線中...");
+                const gameLogs = ref([]);
+                const logsContainer = ref(null);
+                
+                // 響應式樹木狀態 (對應後端的 worldTrees)
+                const trees = reactive({
+                    tree_1: { id: "tree_1", hp: 100 },
+                    tree_2: { id: "tree_2", hp: 100 },
+                    tree_3: { id: "tree_3", hp: 100 }
+                });
+
+                let ws = null;
+
+                // 輔助：格式化時間
+                const getTimestamp = () => new Date().toLocaleTimeString();
+
+                // 新增日誌並自動置底
+                const addLog = (text) => {
+                    gameLogs.value.push({ time: getTimestamp(), text });
+                    // 等待 DOM 更新後，將滾動條拉到最下方
+                    nextTick(() => {
+                        if (logsContainer.value) {
+                            logsContainer.value.scrollTop = logsContainer.value.scrollHeight;
+                        }
+                    });
+                };
+
+                // 初始化 WebSocket
+                const initWebSocket = () => {
+                    ws = new WebSocket('ws://localhost:8080/game');
+
+                    ws.onopen = () => {
+                        isConnected.value = true;
+                        statusMessage.value = "我的身份：已連線玩家";
+                        addLog("成功連線至遊戲伺服器！");
+                    };
+
+                    ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+
+                        // 處理新玩家加入時的世界狀態初始化
+                        if (data.event === "init") {
+                            addLog("收到伺服器同步世界狀態...");
+                            Object.assign(trees, data.trees);
+                        }
+
+                        // 處理砍樹受損事件
+                        if (data.event === "tree_damaged") {
+                            if (trees[data.tree_id]) {
+                                trees[data.tree_id].hp = data.current_hp;
+                            }
+                            addLog(`玩家 [${data.player_id}] 砍了 ${data.tree_id}！(剩餘 HP: ${data.current_hp})`);
+                        }
+                    };
+
+                    ws.onclose = () => {
+                        isConnected.value = false;
+                        statusMessage.value = "與伺服器斷開連線";
+                        addLog("連線已關閉。");
+                    };
+                };
+
+                // 玩家點擊砍樹
+                const chopTree = (treeId) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            action: "chop",
+                            tree_id: treeId
+                        }));
+                    } else {
+                        alert("未連線至伺服器");
+                    }
+                };
+
+                // UI 表現輔助函式
+                const getHpColor = (hp) => {
+                    if (hp <= 30) return '#e74c3c'; // 紅色
+                    if (hp <= 60) return '#f1c40f'; // 黃色
+                    return '#2ecc71';               // 綠色
+                };
+
+                const getTreeEmoji = (id) => {
+                    const emojis = { tree_1: '🌳', tree_2: '🌲', tree_3: '🌴' };
+                    return emojis[id] || '🌳';
+                };
+
+                const getTreeName = (id) => {
+                    const names = { tree_1: '神木 1 號', tree_2: '神木 2 號', tree_3: '神木 3 號' };
+                    return names[id] || id;
+                };
+
+                // 生命週期：組件掛載後建立連線
+                onMounted(() => {
+                    initWebSocket();
+                });
+
+                return {
+                    isConnected,
+                    statusMessage,
+                    trees,
+                    gameLogs,
+                    logsContainer,
+                    chopTree,
+                    getHpColor,
+                    getTreeEmoji,
+                    getTreeName
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
