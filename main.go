@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -157,9 +158,15 @@ func main() {
 		http.ServeFile(w, r, "index.html") // 把同目錄下的 index.html 丟給瀏覽器
 	})
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	server := nbhttp.NewServer(nbhttp.Config{
 		Network: "tcp",
-		Addrs:   []string{":8080"},
+		// 改成 "0.0.0.0:PORT" 的格式，強制監聽所有網路介面
+		Addrs:   []string{"0.0.0.0:" + port},
 		Handler: mux,
 	})
 
@@ -168,7 +175,7 @@ func main() {
 	}
 	defer server.Stop()
 
-	fmt.Println("遊戲伺服器已啟動，監聽 :8080/game")
+	fmt.Println("遊戲伺服器已啟動，監聽 :" + port + "/game")
 	for {
 		time.Sleep(time.Second)
 	}
