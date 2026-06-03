@@ -66,7 +66,7 @@ func broadcast(msgType websocket.MessageType, data []byte) {
 
 func main() {
 	upgrader := websocket.NewUpgrader()
-
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	// 1. 當有玩家連線進來
 	upgrader.OnOpen(func(c *websocket.Conn) {
 		playerMu.Lock()
